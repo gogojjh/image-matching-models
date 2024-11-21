@@ -50,6 +50,13 @@ def plot_matches(
         lwidth=2,
     )
 
+    viz2d.add_text(
+        0,
+        f"{len(result_dict['inlier_kpts0'])} inliers/{len(result_dict['matched_kpts1'])} matches",
+        fs=17,
+        lwidth=2,
+    )
+
     viz2d.add_text(0, "Img0", pos=(0.01, 0.01), va="bottom")
     viz2d.add_text(1, "Img1", pos=(0.01, 0.01), va="bottom")
 

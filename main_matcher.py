@@ -42,16 +42,8 @@ def main(args):
         out_str = f"Paths: {str(img0_path), str(img1_path)}. Found {result['num_inliers']} inliers after RANSAC. "
 
         if not args.no_viz:
-<<<<<<< HEAD:main.py
-            viz2d.plot_images([image0, image1])
-            viz2d.plot_matches(mkpts0[::100, :], mkpts1[::100, :], color="lime", lw=0.2)
-            viz2d.add_text(0, f"{len(mkpts1)} matches", fs=20)
-            viz_path = args.out_dir / f"output_{i}.jpg"
-            viz2d.save_plot(viz_path)
-=======
             viz_path = args.out_dir / f"output_{i}_matches.jpg"
             plot_matches(image0, image1, result, save_path=viz_path)
->>>>>>> dafac0949de037459e8e913aaef48c51dad3a32c:main_matcher.py
             out_str += f"Viz saved in {viz_path}. "
 
         result["img0_path"] = img0_path
