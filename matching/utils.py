@@ -164,7 +164,7 @@ def load_module(module_name: str, module_path: Union[Path, str]) -> None:
     spec.loader.exec_module(module)
 
 
-def add_to_path(path: str | Path, insert=None) -> None:
+def add_to_path(path: Union[str, Path], insert: int = None) -> None:
     path = str(path)
     if path in sys.path:
         sys.path.remove(path)

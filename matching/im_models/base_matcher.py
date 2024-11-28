@@ -199,7 +199,7 @@ class BaseMatcher(torch.nn.Module):
             "inlier_kpts1": inlier_kpts1,
         }
 
-    def extract(self, img: str | Path | torch.Tensor) -> dict:
+    def extract(self, img: Union[str, Path, torch.Tensor]) -> dict:
         # Take as input a pair of images (not a batch)
         if isinstance(img, (str, Path)):
             img = BaseMatcher.load_image(img)

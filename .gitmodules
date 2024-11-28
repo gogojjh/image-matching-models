@@ -42,7 +42,7 @@
 	url = https://github.com/naver/mast3r.git
 [submodule "matching/third_party/mickey"]
 	path = matching/third_party/mickey
-	url = https://github.com/nianticlabs/mickey
+	url = https://github.com/nianticlabs/mickey.git
 [submodule "matching/third_party/keypt2subpx"]
 	path = matching/third_party/keypt2subpx
 	url = https://github.com/KimSinjeong/keypt2subpx.git
