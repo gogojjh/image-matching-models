@@ -1,3 +1,4 @@
+from __future__ import annotations  # py38-compat
 """Visualization utilities for image matching.
 
 Adapted from LightGlue's viz2d: https://github.com/cvg/LightGlue

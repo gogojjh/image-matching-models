@@ -1,3 +1,4 @@
+from __future__ import annotations  # py38-compat
 import importlib
 import logging
 from pathlib import Path

@@ -1,3 +1,4 @@
+from __future__ import annotations  # py38-compat
 """
 File to import matchers. The module's import are within the functions, so that
 a module is imported only if needed, reducing the number of raised errors and
