@@ -78,7 +78,8 @@ def test_plot_matches_result_dict_interface(tmp_path) -> None:
     plt.close("all")
 
 
-_ASSETS = Path(__file__).resolve().parent.parent / "vismatch" / "assets"
+_TESTS_DIR = Path(__file__).resolve().parent
+_ASSETS = _TESTS_DIR.parent / "vismatch" / "assets"
 _EXAMPLE_TEST = _ASSETS / "example_test"
 _EXAMPLE_PAIRS = _ASSETS / "example_pairs"
 
@@ -103,7 +104,7 @@ def test_real_image_matching_original_vs_warped_has_inliers() -> None:
     assert result["H"] is not None
 
 
-def test_real_image_matching_visualization_output(tmp_path) -> None:
+def test_real_image_matching_visualization_output() -> None:
     """Match original/warped and save visualization to tests/ dir."""
     import matplotlib
     matplotlib.use("Agg")
@@ -115,7 +116,7 @@ def test_real_image_matching_visualization_output(tmp_path) -> None:
     img1 = str(_EXAMPLE_TEST / "warped.jpg")
     result = matcher(img0, img1)
 
-    save_path = tmp_path / "original_vs_warped.jpg"
+    save_path = _TESTS_DIR / "original_vs_warped.jpg"
     axs = viz.plot_matches(img0, img1, result, save_path=save_path)
     print(f"[test_viz_orivwarp] save_path={save_path}, exists={save_path.exists()}, "
           f"inliers={result['num_inliers']}")
@@ -124,7 +125,7 @@ def test_real_image_matching_visualization_output(tmp_path) -> None:
     plt.close("all")
 
 
-def test_example_pairs_indoor_matching(tmp_path) -> None:
+def test_example_pairs_indoor_matching() -> None:
     """Match indoor pair (gcs_close vs gcs_far)."""
     import matplotlib
     matplotlib.use("Agg")
@@ -137,7 +138,7 @@ def test_example_pairs_indoor_matching(tmp_path) -> None:
     img1 = str(indoor_dir / "gcs_far.jpg")
     result = matcher(img0, img1)
 
-    save_path = tmp_path / "indoor_match.jpg"
+    save_path = _TESTS_DIR / "indoor_match.jpg"
     axs = viz.plot_matches(img0, img1, result, save_path=save_path, show_text=False)
     viz.add_text(axs[0], f"indoor: {result['num_inliers']} inliers", fs=15)
     viz.save_plot(axs[0].get_figure(), save_path)
@@ -147,7 +148,7 @@ def test_example_pairs_indoor_matching(tmp_path) -> None:
     plt.close("all")
 
 
-def test_example_pairs_outdoor_matching(tmp_path) -> None:
+def test_example_pairs_outdoor_matching() -> None:
     """Match outdoor pair (montmartre_close vs montmartre_far)."""
     import matplotlib
     matplotlib.use("Agg")
@@ -160,7 +161,7 @@ def test_example_pairs_outdoor_matching(tmp_path) -> None:
     img1 = str(outdoor_dir / "montmartre_far.jpg")
     result = matcher(img0, img1)
 
-    save_path = tmp_path / "outdoor_match.jpg"
+    save_path = _TESTS_DIR / "outdoor_match.jpg"
     axs = viz.plot_matches(img0, img1, result, save_path=save_path, show_text=False)
     viz.add_text(axs[0], f"outdoor: {result['num_inliers']} inliers", fs=15)
     viz.save_plot(axs[0].get_figure(), save_path)
