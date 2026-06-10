@@ -38,6 +38,7 @@ class Mast3rMatcher(BaseMatcher):
         self.normalize = tfm.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
 
         self.verbose = False
+        self.min_conf_thr: float = kwargs.get("min_conf_thr", 0.0)
 
         model_path = self.download_weights()
         self.model = AsymmetricMASt3R.from_pretrained(model_path).to(device)
@@ -61,6 +62,22 @@ class Mast3rMatcher(BaseMatcher):
         img = self.normalize(img).unsqueeze(0)
 
         return img, orig_shape
+
+    def _filter_by_conf(
+        self,
+        mkpts0: np.ndarray,
+        mkpts1: np.ndarray,
+        conf0: np.ndarray,
+        conf1: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        if mkpts0.shape[0] == 0:
+            return mkpts0, mkpts1
+        y0 = np.clip(mkpts0[:, 1].astype(np.int32), 0, conf0.shape[0] - 1)
+        x0 = np.clip(mkpts0[:, 0].astype(np.int32), 0, conf0.shape[1] - 1)
+        y1 = np.clip(mkpts1[:, 1].astype(np.int32), 0, conf1.shape[0] - 1)
+        x1 = np.clip(mkpts1[:, 0].astype(np.int32), 0, conf1.shape[1] - 1)
+        keep = (conf0[y0, x0] > self.min_conf_thr) & (conf1[y1, x1] > self.min_conf_thr)
+        return mkpts0[keep], mkpts1[keep]
 
     def _forward(self, img0, img1):
         img0, img0_orig_shape = self.preprocess(img0)
@@ -101,6 +118,9 @@ class Mast3rMatcher(BaseMatcher):
 
         valid_matches = valid_matches_im0 & valid_matches_im1
         mkpts0, mkpts1 = matches_im0[valid_matches], matches_im1[valid_matches]
+        conf_pred1 = pred1["conf"].squeeze(0).detach().cpu().numpy()
+        conf_pred2 = pred2["conf"].squeeze(0).detach().cpu().numpy()
+        mkpts0, mkpts1 = self._filter_by_conf(mkpts0, mkpts1, conf_pred1, conf_pred2)
         # duster sometimes requires reshaping an image to fit vit patch size evenly, so we need to
         # rescale kpts to the original img
         H0, W0, H1, W1 = *img0.shape[-2:], *img1.shape[-2:]
