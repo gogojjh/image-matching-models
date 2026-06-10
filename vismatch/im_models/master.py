@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from pathlib import Path
 import torchvision.transforms as tfm
 import py3_wget
