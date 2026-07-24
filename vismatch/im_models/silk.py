@@ -327,10 +327,6 @@ class SilkMatcher(BaseMatcher):
         **kwargs,
     ):
         super().__init__(device, **kwargs)
-        assert self.device != "mps", (
-            f"Device must be 'cpu' or 'cuda' for {self.name}. Device='{self.device}' not supported"
-        )
-
         self.max_num_keypoints = max_num_keypoints
         self.detection_threshold = detection_threshold
         self.nms_radius = nms_radius
@@ -402,4 +398,4 @@ class SilkMatcher(BaseMatcher):
         all_kpts0 = kpts0[:, :2][:, [1, 0]] if len(kpts0) > 0 else torch.zeros((0, 2), device=self.device)
         all_kpts1 = kpts1[:, :2][:, [1, 0]] if len(kpts1) > 0 else torch.zeros((0, 2), device=self.device)
 
-        return mkpts0, mkpts1, all_kpts0, all_kpts1, desc0, desc1
+        return mkpts0, mkpts1, all_kpts0, all_kpts1, desc0, desc1, None

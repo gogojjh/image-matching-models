@@ -37,11 +37,10 @@ class Keypt2SubpxMatcher(BaseMatcher):
         else:
             self.matcher = get_matcher(detector_name, device=device, **kwargs)
         detector = self.THIRDPARTY_NAMES[detector_name]
-        self.keypt2subpx = (
-            torch.hub.load("KimSinjeong/keypt2subpx", "Keypt2Subpx", pretrained=True, detector=detector, verbose=False)
-            .eval()
-            .to(self.device)
+        self.keypt2subpx = torch.hub.load(
+            "KimSinjeong/keypt2subpx", "Keypt2Subpx", pretrained=True, detector=detector, verbose=False, trust_repo=True
         )
+        self.keypt2subpx = self.keypt2subpx.eval().to(self.device)
 
     def get_match_idxs(self, mkpts: np.ndarray | torch.Tensor, kpts: np.ndarray | torch.Tensor) -> np.ndarray:
         idxs = []
@@ -63,7 +62,9 @@ class Keypt2SubpxMatcher(BaseMatcher):
             return self.matcher.get_scoremap(idx)
 
     def _forward(self, img0, img1):
-        mkpts0, mkpts1, keypoints0, keypoints1, descriptors0, descriptors1 = self.matcher._forward(img0, img1)
+        mkpts0, mkpts1, keypoints0, keypoints1, descriptors0, descriptors1, matched_confidences = self.matcher._forward(
+            img0, img1
+        )
         if len(mkpts0):  # only run subpx refinement if kpts are found
             matching_idxs0, matching_idxs1 = (
                 self.get_match_idxs(mkpts0, keypoints0),
@@ -82,7 +83,7 @@ class Keypt2SubpxMatcher(BaseMatcher):
                 scores0,
                 scores1,
             )
-        return mkpts0, mkpts1, keypoints0, keypoints1, descriptors0, descriptors1
+        return mkpts0, mkpts1, keypoints0, keypoints1, descriptors0, descriptors1, matched_confidences
 
 
 class SuperPointDense(BaseMatcher):
@@ -151,4 +152,4 @@ class SuperPointDense(BaseMatcher):
 
         mkpts0, mkpts1 = kpts0[matches[..., 0]], kpts1[matches[..., 1]]
 
-        return mkpts0, mkpts1, kpts0, kpts1, desc0, desc1
+        return mkpts0, mkpts1, kpts0, kpts1, desc0, desc1, None

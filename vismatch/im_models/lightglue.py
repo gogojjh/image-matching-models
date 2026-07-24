@@ -32,8 +32,9 @@ class LightGlueBase(BaseMatcher):
         desc1 = feats1["descriptors"]
 
         mkpts0, mkpts1 = kpts0[matches[..., 0]], kpts1[matches[..., 1]]
+        mconf = matches01.get("scores")
 
-        return mkpts0, mkpts1, kpts0, kpts1, desc0, desc1
+        return mkpts0, mkpts1, kpts0, kpts1, desc0, desc1, mconf
 
 
 class SiftLightGlue(LightGlueBase):
@@ -67,9 +68,5 @@ class AlikedLightGlue(LightGlueBase):
 class DognetLightGlue(LightGlueBase):
     def __init__(self, device="cpu", max_num_keypoints=2048, *args, **kwargs):
         super().__init__(device, **kwargs)
-        assert self.device != "mps", (
-            f"Device must be 'cpu' or 'cuda' for {self.name}. Device='{self.device}' not supported"
-        )
-
         self.extractor = DoGHardNet(max_num_keypoints=max_num_keypoints).eval().to(self.device)
         self.matcher = LightGlue(features="doghardnet", depth_confidence=-1, width_confidence=-1).to(self.device)

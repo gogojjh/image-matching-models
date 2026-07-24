@@ -38,12 +38,12 @@ Compare matching models across various scenes. For example, we show `SIFT-LightG
 SIFT-LightGlue
 </summary>
 <p float="left">
-  <img src="vismatch/assets/example_sift-lightglue/output_3_matches.jpg" width="195" />
-  <img src="vismatch/assets/example_sift-lightglue/output_2_matches.jpg" width="195" />
-  <img src="vismatch/assets/example_sift-lightglue/output_4_matches.jpg" width="195" />
-  <img src="vismatch/assets/example_sift-lightglue/output_1_matches.jpg" width="195" />
-  <img src="vismatch/assets/example_sift-lightglue/output_0_matches.jpg" width="195" />
-  <img src="vismatch/assets/example_sift-lightglue/output_5_matches.jpg" width="195" />
+  <img src="https://raw.githubusercontent.com/gmberton/vismatch/main/vismatch/assets/example_sift-lightglue/output_3_matches.jpg" width="195" />
+  <img src="https://raw.githubusercontent.com/gmberton/vismatch/main/vismatch/assets/example_sift-lightglue/output_2_matches.jpg" width="195" />
+  <img src="https://raw.githubusercontent.com/gmberton/vismatch/main/vismatch/assets/example_sift-lightglue/output_4_matches.jpg" width="195" />
+  <img src="https://raw.githubusercontent.com/gmberton/vismatch/main/vismatch/assets/example_sift-lightglue/output_1_matches.jpg" width="195" />
+  <img src="https://raw.githubusercontent.com/gmberton/vismatch/main/vismatch/assets/example_sift-lightglue/output_0_matches.jpg" width="195" />
+  <img src="https://raw.githubusercontent.com/gmberton/vismatch/main/vismatch/assets/example_sift-lightglue/output_5_matches.jpg" width="195" />
 
 </p>
 </details>
@@ -52,12 +52,12 @@ SIFT-LightGlue
 LoFTR
 </summary>
 <p float="left">
-  <img src="vismatch/assets/example_loftr/output_3_matches.jpg" width="195" />
-  <img src="vismatch/assets/example_loftr/output_2_matches.jpg" width="195" />
-  <img src="vismatch/assets/example_loftr/output_4_matches.jpg" width="195" />
-  <img src="vismatch/assets/example_loftr/output_1_matches.jpg" width="195" />
-  <img src="vismatch/assets/example_loftr/output_0_matches.jpg" width="195" />
-  <img src="vismatch/assets/example_loftr/output_5_matches.jpg" width="195" />
+  <img src="https://raw.githubusercontent.com/gmberton/vismatch/main/vismatch/assets/example_loftr/output_3_matches.jpg" width="195" />
+  <img src="https://raw.githubusercontent.com/gmberton/vismatch/main/vismatch/assets/example_loftr/output_2_matches.jpg" width="195" />
+  <img src="https://raw.githubusercontent.com/gmberton/vismatch/main/vismatch/assets/example_loftr/output_4_matches.jpg" width="195" />
+  <img src="https://raw.githubusercontent.com/gmberton/vismatch/main/vismatch/assets/example_loftr/output_1_matches.jpg" width="195" />
+  <img src="https://raw.githubusercontent.com/gmberton/vismatch/main/vismatch/assets/example_loftr/output_0_matches.jpg" width="195" />
+  <img src="https://raw.githubusercontent.com/gmberton/vismatch/main/vismatch/assets/example_loftr/output_5_matches.jpg" width="195" />
 </p>
 </details>
 
@@ -67,10 +67,10 @@ You can also extract keypoints and associated descriptors.
 SIFT and DeDoDe
 </summary>
 <p float="left">
-  <img src="vismatch/assets/example_sift-lightglue/output_8_kpts.jpg" width="195" />
-  <img src="vismatch/assets/example_dedode/output_8_kpts.jpg" width="195" />
-  <img src="vismatch/assets/example_sift-lightglue/output_0_kpts.jpg" width="195" />
-  <img src="vismatch/assets/example_dedode/output_0_kpts.jpg" width="195" />
+  <img src="https://raw.githubusercontent.com/gmberton/vismatch/main/vismatch/assets/example_sift-lightglue/output_8_kpts.jpg" width="195" />
+  <img src="https://raw.githubusercontent.com/gmberton/vismatch/main/vismatch/assets/example_dedode/output_8_kpts.jpg" width="195" />
+  <img src="https://raw.githubusercontent.com/gmberton/vismatch/main/vismatch/assets/example_sift-lightglue/output_0_kpts.jpg" width="195" />
+  <img src="https://raw.githubusercontent.com/gmberton/vismatch/main/vismatch/assets/example_dedode/output_0_kpts.jpg" width="195" />
 </p>
 </details>
 
@@ -121,11 +121,11 @@ from vismatch.viz import plot_matches, plot_keypoints
 matcher = get_matcher("superpoint-lightglue", device="cuda")
 img_size = 512  # optional
 
-img0 = matcher.load_image("assets/example_pairs/outdoor/montmartre_close.jpg", resize=img_size)
-img1 = matcher.load_image("assets/example_pairs/outdoor/montmartre_far.jpg", resize=img_size)
+img0 = matcher.load_image("vismatch/assets/example_pairs/outdoor/montmartre_close.jpg", resize=img_size)
+img1 = matcher.load_image("vismatch/assets/example_pairs/outdoor/montmartre_far.jpg", resize=img_size)
 
 result = matcher(img0, img1)
-# result.keys() = ["num_inliers", "H", "all_kpts0", "all_kpts1", "all_desc0", "all_desc1", "matched_kpts0", "matched_kpts1", "inlier_kpts0", "inlier_kpts1"]
+# result.keys() = ["num_inliers", "H", "all_kpts0", "all_kpts1", "all_desc0", "all_desc1", "matched_kpts0", "matched_kpts1", "inlier_kpts0", "inlier_kpts1", "matched_confidences"]
 
 # This will plot visualizations for matches as shown in the figures above
 plot_matches(img0, img1, result, save_path="plot_matches.png")
@@ -141,9 +141,9 @@ You can also run matching or extraction as standalone scripts, to get the same r
 #### Matching:
 ```bash
 # if you cloned this repo, vismatch_match.py is available, else see CLI below
-python vismatch_match.py --matcher superpoint-lightglue --out-dir outputs/superpoint-lightglue --input assets/example_pairs/outdoor/montmartre_close.jpg assets/example_pairs/outdoor/montmartre_far.jpg
+python vismatch_match.py --matcher superpoint-lightglue --out-dir outputs/superpoint-lightglue --input vismatch/assets/example_pairs/outdoor/montmartre_close.jpg vismatch/assets/example_pairs/outdoor/montmartre_far.jpg
 # or
-uv run vismatch_match.py --matcher superpoint-lightglue --out-dir outputs/superpoint-lightglue --input assets/example_pairs/outdoor/montmartre_close.jpg assets/example_pairs/outdoor/montmartre_far.jpg
+uv run vismatch_match.py --matcher superpoint-lightglue --out-dir outputs/superpoint-lightglue --input vismatch/assets/example_pairs/outdoor/montmartre_close.jpg vismatch/assets/example_pairs/outdoor/montmartre_far.jpg
 ```
 From any location where an python enviroment with vismatch installed is active, you can also run
 ```bash
@@ -153,9 +153,9 @@ vismatch-match --matcher superpoint-lightglue --out-dir outputs/superpoint-light
 #### Keypoints extraction:
 ```bash
 # if you cloned this repo, vismatch_extract.py is available, else see CLI below
-python vismatch_extract.py --matcher superpoint-lightglue --out-dir outputs/superpoint-lightglue --input assets/example_pairs/outdoor/montmartre_close.jpg
+python vismatch_extract.py --matcher superpoint-lightglue --out-dir outputs/superpoint-lightglue --input vismatch/assets/example_pairs/outdoor/montmartre_close.jpg
 # or
-uv run vismatch_extract.py --matcher superpoint-lightglue --out-dir outputs/superpoint-lightglue --input assets/example_pairs/outdoor/montmartre_close.jpg
+uv run vismatch_extract.py --matcher superpoint-lightglue --out-dir outputs/superpoint-lightglue --input vismatch/assets/example_pairs/outdoor/montmartre_close.jpg
 ```
 From any location where an python enviroment with vismatch installed is active, you can also run
 
@@ -182,19 +182,19 @@ We support the following methods:
 
 **Sparse**: ```[sift, superpoint, disk, aliked, dedode, doghardnet, gim, xfeat]-lightglue, dedode, steerers, affine-steerers, xfeat-steerers[-perm/learned], dedode-kornia, [sift, orb, doghardnet]-nn, patch2pix, superglue, r2d2, d2net,  gim-dkm, xfeat, omniglue, [dedode, xfeat, aliked]-subpx, [sift, superpoint]-sphereglue, minima-superpoint-lightglue, liftfeat, rdd-[sparse,lightglue, aliked], ripe, lisrd, zippypoint, loma, loma-r```
 
-See [Model Details](docs/source/model_details.md) to see runtimes, supported devices, source, and license of each model.
+See [Model Details](https://github.com/gmberton/vismatch/blob/main/docs/source/model_details.md) to see runtimes, supported devices, source, and license of each model.
 
 **Important:** although VisMatch uses a BSD 3-Clause License, the matchers we wrap can have different licenses. Please refer to each matcher's license when using them.
 
 ## Adding a new method
-See [CONTRIBUTING.md](CONTRIBUTING.md) for details. We follow the [1st principle of PyTorch](https://docs.pytorch.org/docs/stable/community/design.html#design-principles): Usability over Performance
+See [CONTRIBUTING.md](https://github.com/gmberton/vismatch/blob/main/CONTRIBUTING.md) for details. We follow the [1st principle of PyTorch](https://docs.pytorch.org/docs/stable/community/design.html#design-principles): Usability over Performance
 
 ## Documentation 
 
 Please see docs at: https://vismatch.readthedocs.io/en/latest/ 
 
 ## Acknowledgements
-Special thanks to the authors of all models included in this repo (links in [Model Details](docs/source/model_details.md)), and to authors of other libraries we wrap like the [Image Matching Toolbox](https://github.com/GrumpyZhou/image-matching-toolbox/tree/main) and [Kornia](https://github.com/kornia/kornia).
+Special thanks to the authors of all models included in this repo (links in [Model Details](https://github.com/gmberton/vismatch/blob/main/docs/source/model_details.md)), and to authors of other libraries we wrap like the [Image Matching Toolbox](https://github.com/GrumpyZhou/image-matching-toolbox/tree/main) and [Kornia](https://github.com/kornia/kornia).
 
 ## Download Stats
 Daily downloads across all [vismatch HuggingFace models](https://huggingface.co/vismatch), updated daily.

@@ -7,7 +7,7 @@ import torch.nn.functional as F
 
 from huggingface_hub import snapshot_download
 from vismatch import BaseMatcher, THIRD_PARTY_DIR
-from vismatch.utils import add_to_path, to_device, pad_images_to_same_shape, disable_xformers
+from vismatch.utils import add_to_path, to_device, pad_images_to_same_shape, disable_xformers, lower_config
 
 # Expose the MatchAnything HF Space code (nested under imcui/third_party/MatchAnything) and its deps.
 MATCHANYTHING_DIR = THIRD_PARTY_DIR.joinpath("MatchAnything", "imcui", "third_party", "MatchAnything")
@@ -18,16 +18,9 @@ add_to_path(MATCHANYTHING_DIR)
 add_to_path(MATCHANYTHING_DIR.joinpath("third_party"))
 add_to_path(MATCHANYTHING_DIR.joinpath("third_party", "ROMA"))
 
-from yacs.config import CfgNode as CN  # noqa: E402
 from src.loftr import LoFTR  # noqa: E402
 from src.config.default import get_cfg_defaults  # noqa: E402
 from ROMA.roma.matchanything_roma_model import MatchAnything_Model  # noqa: E402
-
-
-def _lower_config(yacs_cfg):
-    if not isinstance(yacs_cfg, CN):
-        return yacs_cfg
-    return {k.lower(): _lower_config(v) for k, v in yacs_cfg.items()}
 
 
 class MatchAnythingMatcher(BaseMatcher):
@@ -53,13 +46,10 @@ class MatchAnythingMatcher(BaseMatcher):
 
         self.model_name = f"matchanything_{self.variant}"
         self._load_model()
-        if device == "cpu":
+        if "cuda" not in device:
             disable_xformers()
 
     def _load_model(self):
-        # Ensure MatchAnything's ``src`` is resolvable even when another
-        # matcher was loaded between module import and this instantiation.
-        add_to_path(MATCHANYTHING_DIR)
         cfg = get_cfg_defaults()
         if self.variant == "eloftr":
             cfg.merge_from_file(str(MATCHANYTHING_DIR.joinpath("configs", "models", "eloftr_model.py")))
@@ -69,21 +59,17 @@ class MatchAnythingMatcher(BaseMatcher):
                     cfg.LOFTR.COARSE.NPE = [832, 832, target_size, target_size]
         else:
             cfg.merge_from_file(str(MATCHANYTHING_DIR.joinpath("configs", "models", "roma_model.py")))
-            if self.device == "cpu":
+            if "cuda" not in self.device:
                 cfg.LOFTR.FP16 = False
                 cfg.ROMA.MODEL.AMP = False
 
         cfg.METHOD = self.model_name
         cfg.LOFTR.MATCH_COARSE.THR = self.match_threshold
 
-        cfg_lower = _lower_config(cfg)
+        cfg_lower = lower_config(cfg)
         if self.variant == "eloftr":
             self.net = LoFTR(config=cfg_lower["loftr"])
         else:
-            assert self.device != "mps", (
-                f"Device must be 'cpu' or 'cuda' for {self.name}. Device='{self.device}' not supported"
-            )
-
             self.net = MatchAnything_Model(config=cfg_lower["roma"], test_mode=True)
 
         weights_path = f"{snapshot_download(f'vismatch/matchanything-{self.variant}')}/model.safetensors"
@@ -147,12 +133,13 @@ class MatchAnythingMatcher(BaseMatcher):
 
         mkpts0 = batch["mkpts0_f"].detach().cpu()
         mkpts1 = batch["mkpts1_f"].detach().cpu()
+        mconf = batch["mconf"] if "mconf" in batch else None
 
         if self.variant == "eloftr":
             mkpts0 *= torch.tensor(img0_scale)[[1, 0]]
             mkpts1 *= torch.tensor(img1_scale)[[1, 0]]
 
-        return mkpts0, mkpts1, None, None, None, None
+        return mkpts0, mkpts1, None, None, None, None, mconf
 
 
 # Custom resize logic from MatchAnything to preserve padding/masks expected by the upstream config.

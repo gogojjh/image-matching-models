@@ -4,13 +4,17 @@ from safetensors.torch import load_file
 
 from huggingface_hub import snapshot_download
 from vismatch import BaseMatcher, THIRD_PARTY_DIR
-from vismatch.utils import resize_to_divisible, add_to_path
+from vismatch.utils import resize_to_divisible, add_to_path, force_float32, patch_sample_keypoints_device
 
 add_to_path(THIRD_PARTY_DIR.joinpath("affine-steerers"))
 from affine_steerers.utils import build_affine
 from affine_steerers.matchers.dual_softmax_matcher import MaxSimilarityMatcher
 from affine_steerers.steerers import SteererSpread
 from affine_steerers import dedode_detector_L, dedode_descriptor_B, dedode_descriptor_G
+from affine_steerers import utils as aff_steerers_utils
+from affine_steerers.detectors import dedode_detector as aff_detector_module
+
+patch_sample_keypoints_device(aff_steerers_utils, aff_detector_module)
 
 
 class AffSteererMatcher(BaseMatcher):
@@ -28,9 +32,6 @@ class AffSteererMatcher(BaseMatcher):
     ):
         super().__init__(device, **kwargs)
 
-        # only cuda devices work due to autocast in cuda in upstream.
-        assert "cuda" in self.device, f"Device must be 'cuda' for {self.name}. Device='{self.device}' not supported"
-
         self.steerer_type = steerer_type
         if self.steerer_type not in self.STEERER_TYPES:
             raise ValueError(
@@ -43,16 +44,18 @@ class AffSteererMatcher(BaseMatcher):
         self.normalize = tfm.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 
         self.detector, self.descriptor, self.steerer, self.matcher = self.build_matcher()
+        if "cuda" not in self.device:
+            force_float32(self)  # half precision is not supported on CPU
 
     def build_matcher(self):
         repo = snapshot_download("vismatch/affine-steerers")
-        detector = dedode_detector_L(weights=load_file(f"{repo}/dedode_detector_C4.safetensors"))
+        detector = dedode_detector_L(device=self.device, weights=load_file(f"{repo}/dedode_detector_C4.safetensors"))
 
         descriptor_path = f"{repo}/descriptor_aff_{self.steerer_type}.safetensors"
         if "G" in self.steerer_type:
-            descriptor = dedode_descriptor_G(weights=load_file(descriptor_path))
+            descriptor = dedode_descriptor_G(device=self.device, weights=load_file(descriptor_path))
         else:
-            descriptor = dedode_descriptor_B(weights=load_file(descriptor_path))
+            descriptor = dedode_descriptor_B(device=self.device, weights=load_file(descriptor_path))
 
         steerer_path = f"{repo}/steerer_aff_{self.steerer_type}.safetensors"
         steerer = self.load_steerer(steerer_path).to(self.device).eval()
@@ -140,4 +143,4 @@ class AffSteererMatcher(BaseMatcher):
         mkpts0 = self.rescale_coords(mkpts0, *img0_orig_shape, H0, W0)
         mkpts1 = self.rescale_coords(mkpts1, *img1_orig_shape, H1, W1)
 
-        return mkpts0, mkpts1, keypoints_0[0], keypoints_1[0], description_0[0], description_1[0]
+        return mkpts0, mkpts1, keypoints_0[0], keypoints_1[0], description_0[0], description_1[0], None

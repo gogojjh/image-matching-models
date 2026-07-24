@@ -5,6 +5,7 @@ import numpy as np
 import os
 import torchvision.transforms as tfm
 import torch
+from contextlib import contextmanager
 from pathlib import Path
 
 # Monkey patch torch.load to use weights_only=False by default for compatibility with PyTorch 2.6+
@@ -28,22 +29,56 @@ add_to_path(BASE_PATH)
 import immatch
 
 
+@contextmanager
+def _hardcoded_cuda_as_noop():
+    """Make hardcoded ``module.cuda()`` calls no-ops while CUDA is unavailable.
+
+    The vendored patch2pix networks call ``.cuda()`` unconditionally at construction
+    (e.g. NeighConsensus, FeatureExtraction), which crashes on CUDA-less machines;
+    the caller moves the model to the right device afterwards anyway.
+    """
+    if torch.cuda.is_available():
+        yield
+        return
+    original_cuda = torch.nn.Module.cuda
+    torch.nn.Module.cuda = lambda module, device=None: module
+    try:
+        yield
+    finally:
+        torch.nn.Module.cuda = original_cuda
+
+
+class _OnCpu(torch.nn.Module):
+    """Run a submodule on CPU, moving its inputs over and leaving its output there."""
+
+    def __init__(self, module):
+        super().__init__()
+        self.module = module.cpu()
+
+    def forward(self, *args):
+        return self.module(*[a.cpu() for a in args])
+
+
 class Patch2pixMatcher(BaseMatcher):
     divisible_by = 32
 
     def __init__(self, device="cpu", *args, **kwargs):
         super().__init__(device, **kwargs)
-        assert "cuda" in self.device or self.device == "cpu", (
-            f"Device must be 'cpu' or 'cuda' for {self.name}. Device='{self.device}' not supported"
-        )
-
         with open(BASE_PATH.joinpath("configs/patch2pix.yml"), "r") as f:
             args = yaml.load(f, Loader=yaml.FullLoader)["sat"]
 
         args["ckpt"] = f"{snapshot_download('vismatch/patch2pix')}/model.pth"
-        self.matcher = immatch.__dict__[args["class"]](args)
+        with _hardcoded_cuda_as_noop():
+            self.matcher = immatch.__dict__[args["class"]](args)
         self.matcher.model = self.matcher.model.to(device)
         self.matcher.model.device = torch.device(device)
+        if "mps" in self.device:
+            # The matching stages build work buffers, index grids and coordinates on CPU and only
+            # move them to CUDA (never MPS), so on MPS they mix devices and crash. Force these small
+            # stages fully onto CPU (via _OnCpu, which moves their inputs over too), leaving only the
+            # heavy CNN backbone (`extract`) on MPS -- no device mixing, no MPS-unsupported ops.
+            for name in ("combine", "ncn", "regress_mid", "regress_fine"):
+                setattr(self.matcher.model, name, _OnCpu(getattr(self.matcher.model, name)))
         self.normalize = tfm.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 
     def preprocess(self, img):
@@ -69,11 +104,11 @@ class Patch2pixMatcher(BaseMatcher):
         if len(pos_ids) > 0:
             coarse_matches = coarse_matches[pos_ids]
             matches = fine_matches[pos_ids]
-            # scores = fine_scores[pos_ids]
+            scores = fine_scores[pos_ids]
         else:
             # Simply take all matches for this case
             matches = fine_matches
-            # scores = fine_scores
+            scores = fine_scores
 
         mkpts0 = matches[:, :2]
         mkpts1 = matches[:, 2:4]
@@ -82,7 +117,7 @@ class Patch2pixMatcher(BaseMatcher):
         mkpts0 = self.rescale_coords(mkpts0, *img0_orig_shape, H0, W0)
         mkpts1 = self.rescale_coords(mkpts1, *img1_orig_shape, H1, W1)
 
-        return mkpts0, mkpts1, None, None, None, None
+        return mkpts0, mkpts1, None, None, None, None, scores
 
 
 class SuperGlueMatcher(BaseMatcher):
@@ -120,11 +155,11 @@ class SuperGlueMatcher(BaseMatcher):
         img0_gray = self.to_gray(img0).unsqueeze(0).to(self.device)
         img1_gray = self.to_gray(img1).unsqueeze(0).to(self.device)
 
-        matches, kpts0, kpts1, _ = self.matcher.match_inputs_(img0_gray, img1_gray)
+        matches, kpts0, kpts1, scores = self.matcher.match_inputs_(img0_gray, img1_gray)
         mkpts0 = matches[:, :2]
         mkpts1 = matches[:, 2:4]
 
-        return mkpts0, mkpts1, kpts0, kpts1, None, None
+        return mkpts0, mkpts1, kpts0, kpts1, None, None, scores
 
 
 class R2D2Matcher(BaseMatcher):
@@ -165,7 +200,7 @@ class R2D2Matcher(BaseMatcher):
         mkpts0 = kpts0[match_ids[:, 0], :2].cpu().numpy()
         mkpts1 = kpts1[match_ids[:, 1], :2].cpu().numpy()
 
-        return mkpts0, mkpts1, kpts0[:, :2], kpts1[:, :2], desc0, desc1
+        return mkpts0, mkpts1, kpts0[:, :2], kpts1[:, :2], desc0, desc1, scores
 
 
 class D2netMatcher(BaseMatcher):
@@ -203,11 +238,11 @@ class D2netMatcher(BaseMatcher):
         kpts0, desc0 = self.model.extract_features(img0)
         kpts1, desc1 = self.model.extract_features(img1)
 
-        match_ids, _ = self.model.mutual_nn_match(desc0, desc1, threshold=self.match_threshold)
+        match_ids, scores = self.model.mutual_nn_match(desc0, desc1, threshold=self.match_threshold)
         mkpts0 = kpts0[match_ids[:, 0], :2]
         mkpts1 = kpts1[match_ids[:, 1], :2]
 
-        return mkpts0, mkpts1, kpts0, kpts1, desc0, desc1
+        return mkpts0, mkpts1, kpts0, kpts1, desc0, desc1, scores
 
 
 class DogAffHardNNMatcher(BaseMatcher):
@@ -234,8 +269,8 @@ class DogAffHardNNMatcher(BaseMatcher):
         img0 = self.tensor_to_numpy_int(img0)
         img1 = self.tensor_to_numpy_int(img1)
 
-        matches, _, _, _ = self.model.match_inputs_(img0, img1)
+        matches, _, _, scores = self.model.match_inputs_(img0, img1)
         mkpts0 = matches[:, :2]
         mkpts1 = matches[:, 2:4]
 
-        return mkpts0, mkpts1, None, None, None, None
+        return mkpts0, mkpts1, None, None, None, None, scores.reshape(-1)

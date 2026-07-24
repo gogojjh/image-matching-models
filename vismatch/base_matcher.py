@@ -5,6 +5,7 @@ import numpy as np
 from PIL import Image
 from pathlib import Path
 
+from vismatch.import_sandbox import sandboxed_method
 from vismatch.utils import to_normalized_coords, to_px_coords, to_numpy, _load_image, to_tensor_image
 
 
@@ -15,6 +16,19 @@ class BaseMatcher(torch.nn.Module):
     __init__ and _forward methods. It also provides a common image_loader and
     homography estimator
     """
+
+    def __init_subclass__(cls, **kwargs):
+        # Run each wrapper-defined matcher's __init__ and _forward inside that wrapper's
+        # ImportSandbox: third-party code does lazy imports at construction time (MINIMA, EDM's
+        # yacs configs) and at inference time (xfeat's lighterglue), and EnsembleMatcher /
+        # Keypt2SubpxMatcher call inner matchers' _forward directly, bypassing forward().
+        super().__init_subclass__(**kwargs)
+        if not cls.__module__.startswith("vismatch.im_models."):
+            return
+        for method_name in ("__init__", "_forward"):
+            method = cls.__dict__.get(method_name)
+            if method is not None:
+                setattr(cls, method_name, sandboxed_method(method, cls.__module__))
 
     def __init__(self, device: str = "cpu", **kwargs):
         super().__init__()
@@ -122,6 +136,7 @@ class BaseMatcher(torch.nn.Module):
                 - matched_kpts1 (np.ndarray): (N2 x 2) keypoints from img1 that match matched_kpts0 (pre-RANSAC)
                 - inlier_kpts0 (np.ndarray): (N3 x 2) filtered matched_kpts0 that fit the H model (post-RANSAC)
                 - inlier_kpts1 (np.ndarray): (N3 x 2) filtered matched_kpts1 that fit the H model (post-RANSAC)
+                - matched_confidences (np.ndarray | None): (N2,) per-match confidence scores, None if the matcher does not provide confidence (pre-RANSAC).
         """
 
         # Take as input a pair of images (not a batch)
@@ -129,15 +144,22 @@ class BaseMatcher(torch.nn.Module):
         img1 = to_tensor_image(img1).to(self.device)
 
         # self._forward() is implemented by the children modules
-        matched_kpts0, matched_kpts1, all_kpts0, all_kpts1, all_desc0, all_desc1 = self._forward(img0, img1)
+        outputs = self._forward(img0, img1)
+        assert len(outputs) == 7, (
+            f"{self.name}._forward() must return 7 values "
+            f"(matched_kpts0, matched_kpts1, all_kpts0, all_kpts1, all_desc0, all_desc1, matched_confidences), "
+            f"got {len(outputs)}. Return None for matched_confidences if the matcher has no per-match confidence."
+        )
+        matched_kpts0, matched_kpts1, all_kpts0, all_kpts1, all_desc0, all_desc1, matched_confidences = outputs
 
         # Check that returned objects are of accepted types (nd.array, torch.tensor or None)
-        self.check_types(matched_kpts0, matched_kpts1, all_kpts0, all_kpts1, all_desc0, all_desc1)
+        self.check_types(matched_kpts0, matched_kpts1, all_kpts0, all_kpts1, all_desc0, all_desc1, matched_confidences)
 
         # Convert torch tensors to numpy. None objects stay None
         matched_kpts0, matched_kpts1 = to_numpy(matched_kpts0), to_numpy(matched_kpts1)
         all_kpts0, all_kpts1 = to_numpy(all_kpts0), to_numpy(all_kpts1)
         all_desc0, all_desc1 = to_numpy(all_desc0), to_numpy(all_desc1)
+        matched_confidences = to_numpy(matched_confidences)
 
         # Some models might return kpts=None if no kpts are found. In this case, set an empty array with dim (0, 2)
         matched_kpts0 = self.get_empty_array_if_none(matched_kpts0)
@@ -149,7 +171,16 @@ class BaseMatcher(torch.nn.Module):
         all_desc1 = self.get_empty_array_if_none(all_desc1)
 
         # Check that shapes are correct and consistent
-        self.check_shapes(matched_kpts0, matched_kpts1, all_kpts0, all_kpts1, all_desc0, all_desc1)
+        self.check_shapes(matched_kpts0, matched_kpts1, all_kpts0, all_kpts1, all_desc0, all_desc1, matched_confidences)
+
+        # Drop matches with a kpt outside its image, e.g. on regions added by padding (see issue #69)
+        (h0, w0), (h1, w1) = img0.shape[-2:], img1.shape[-2:]
+        valid = (
+            (matched_kpts0 >= 0) & (matched_kpts0 < [w0, h0]) & (matched_kpts1 >= 0) & (matched_kpts1 < [w1, h1])
+        ).all(1)
+        matched_kpts0, matched_kpts1 = matched_kpts0[valid], matched_kpts1[valid]
+        if matched_confidences is not None:
+            matched_confidences = matched_confidences[valid]
 
         # Compute RANSAC to obtain the inliers and homography matrix
         H, inlier_kpts0, inlier_kpts1 = self.compute_ransac(matched_kpts0, matched_kpts1)
@@ -165,6 +196,7 @@ class BaseMatcher(torch.nn.Module):
             "matched_kpts1": matched_kpts1,
             "inlier_kpts0": inlier_kpts0,
             "inlier_kpts1": inlier_kpts1,
+            "matched_confidences": matched_confidences,
         }
 
     def extract(self, img: torch.Tensor | np.ndarray | str | Path | Image.Image) -> dict[str, np.ndarray]:
@@ -189,7 +221,7 @@ class BaseMatcher(torch.nn.Module):
         return array
 
     @staticmethod
-    def check_types(matched_kpts0, matched_kpts1, all_kpts0, all_kpts1, all_desc0, all_desc1):
+    def check_types(matched_kpts0, matched_kpts1, all_kpts0, all_kpts1, all_desc0, all_desc1, matched_confidences):
         """Check that objects are of accepted types (nd.array, torch.tensor or None)"""
 
         def is_array_or_tensor_or_none(data) -> bool:
@@ -201,9 +233,10 @@ class BaseMatcher(torch.nn.Module):
         assert is_array_or_tensor_or_none(all_kpts1)
         assert is_array_or_tensor_or_none(all_desc0)
         assert is_array_or_tensor_or_none(all_desc1)
+        assert is_array_or_tensor_or_none(matched_confidences)
 
     @staticmethod
-    def check_shapes(matched_kpts0, matched_kpts1, all_kpts0, all_kpts1, all_desc0, all_desc1):
+    def check_shapes(matched_kpts0, matched_kpts1, all_kpts0, all_kpts1, all_desc0, all_desc1, matched_confidences):
         """Check that objects have appropriate shapes, e.g. keypoints should have shape (N, 2)"""
 
         def check_kpts_shape(np_array) -> bool:
@@ -224,6 +257,13 @@ class BaseMatcher(torch.nn.Module):
             assert all_desc0.shape[0] == all_kpts0.shape[0], f"{all_desc0.shape[0]} != {all_kpts0.shape[0]}"
         if all_desc1.shape[0] != 0:
             assert all_desc1.shape[0] == all_kpts1.shape[0], f"{all_desc1.shape[0]} != {all_kpts1.shape[0]}"
+        if matched_confidences is not None:
+            assert matched_confidences.ndim == 1, (
+                f"matched_confidences shape should be (N,) but it is {matched_confidences.shape}"
+            )
+            assert matched_confidences.shape[0] == matched_kpts0.shape[0], (
+                f"{matched_confidences.shape[0]} != {matched_kpts0.shape[0]}"
+            )
 
 
 class EnsembleMatcher(BaseMatcher):
@@ -233,11 +273,13 @@ class EnsembleMatcher(BaseMatcher):
         super().__init__(device, **kwargs)
         self.matchers = [get_matcher(name, device=device, **kwargs) for name in matcher_names]
 
-    def _forward(self, img0: torch.Tensor, img1: torch.Tensor) -> tuple[np.ndarray, np.ndarray, None, None, None, None]:
+    def _forward(
+        self, img0: torch.Tensor, img1: torch.Tensor
+    ) -> tuple[np.ndarray, np.ndarray, None, None, None, None, None]:
         all_matched_kpts0, all_matched_kpts1 = [], []
         for matcher in self.matchers:
-            matched_kpts0, matched_kpts1, _, _, _, _ = matcher._forward(img0, img1)
+            matched_kpts0, matched_kpts1, _, _, _, _, _ = matcher._forward(img0, img1)
             all_matched_kpts0.append(to_numpy(matched_kpts0))
             all_matched_kpts1.append(to_numpy(matched_kpts1))
         all_matched_kpts0, all_matched_kpts1 = np.concatenate(all_matched_kpts0), np.concatenate(all_matched_kpts1)
-        return all_matched_kpts0, all_matched_kpts1, None, None, None, None
+        return all_matched_kpts0, all_matched_kpts1, None, None, None, None, None

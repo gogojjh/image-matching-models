@@ -1,11 +1,13 @@
 from torch import Tensor
 from huggingface_hub import snapshot_download
+from kornia.feature.lightglue import LightGlue
 
 from vismatch import BaseMatcher, THIRD_PARTY_DIR
 from vismatch.utils import add_to_path
 
 add_to_path(THIRD_PARTY_DIR.joinpath("accelerated_features"))
 from modules.xfeat import XFeat
+from modules.lighterglue import LighterGlue
 
 
 class xFeatMatcher(BaseMatcher):
@@ -23,13 +25,12 @@ class xFeatMatcher(BaseMatcher):
         self.mode = mode
 
         if self.mode == "lighterglue":
-            assert "cuda" in self.device, (
-                f"Device must be 'cuda' for {self.name} with mode {self.mode}. Device='{self.device}' not supported"
-            )
-        elif self.mode != "semi-dense":
-            assert self.device != "mps", (
-                f"Device must be 'cpu' or 'cuda' for {self.name} with mode {self.mode}. Device='{self.device}' not supported"
-            )
+            # LighterGlue ignores the device we pass and moves itself to cuda-if-available; put it on self.device.
+            # Its init also overwrites kornia's LightGlue.default_conf globally, breaking other LightGlue-based
+            # matchers (e.g. dedode-lightglue), so restore the original conf afterwards.
+            default_conf = LightGlue.default_conf
+            self.model.lighterglue = LighterGlue().to(self.device)
+            LightGlue.default_conf = default_conf
 
     def preprocess(self, img: Tensor) -> Tensor:
         # return a [B, C, Hs, W] tensor
@@ -61,7 +62,9 @@ class xFeatMatcher(BaseMatcher):
                 output0.update({"image_size": (img0.shape[-1], img0.shape[-2])})
                 output1.update({"image_size": (img1.shape[-1], img1.shape[-2])})
 
-                mkpts0, mkpts1 = self.model.match_lighterglue(output0, output1)
+                # match_lighterglue returns 2 or 3 values across accelerated_features versions; the 3rd is
+                # match indices (not confidence), so keep only the keypoints.
+                mkpts0, mkpts1 = self.model.match_lighterglue(output0, output1)[:2]
             else:  # sparse
                 idxs0, idxs1 = self.model.match(output0["descriptors"], output1["descriptors"], min_cossim=-1)
                 mkpts0, mkpts1 = output0["keypoints"][idxs0], output1["keypoints"][idxs1]
@@ -75,4 +78,5 @@ class xFeatMatcher(BaseMatcher):
             output1["keypoints"].squeeze(),
             output0["descriptors"].squeeze(),
             output1["descriptors"].squeeze(),
+            None,  # matched_confidences
         )

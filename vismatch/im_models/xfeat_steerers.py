@@ -27,10 +27,6 @@ class xFeatSteerersMatcher(BaseMatcher):
         super().__init__(device, **kwargs)
         if mode not in ["sparse", "semi-dense"]:
             raise ValueError(f'unsupported mode for xfeat: {self.mode}. Must choose from ["sparse", "semi-dense"]')
-        if mode != "semi-dense":
-            assert self.device != "mps", (
-                f"Device must be 'cpu' or 'cuda' for {self.name} with mode {mode}. Device='{self.device}' not supported"
-            )
 
         self.steerer_type = steerer_type
         if self.steerer_type not in ["learned", "perm"]:
@@ -43,7 +39,9 @@ class xFeatSteerersMatcher(BaseMatcher):
         self.learned_weights_path = cache_dir / "xfeat_learn_steer.pth"
         self.steerer_weights_path = cache_dir / "xfeat_learn_steer_steerer.pth"
 
-        self.model = torch.hub.load("verlab/accelerated_features", "XFeat", pretrained=False, top_k=max_num_keypoints)
+        self.model = torch.hub.load(
+            "verlab/accelerated_features", "XFeat", pretrained=False, top_k=max_num_keypoints, trust_repo=True
+        )
         self.download_weights(cache_dir)
 
         # Load xfeat-fixed-perm-steerers weights
@@ -160,4 +158,5 @@ class xFeatSteerersMatcher(BaseMatcher):
             output1["keypoints"].squeeze(),
             output0["descriptors"].squeeze(),
             output1["descriptors"].squeeze(),
+            None,  # matched_confidences
         )

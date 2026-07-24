@@ -7,12 +7,14 @@ warnings due to unused modules.
 
 from importlib.metadata import version, PackageNotFoundError
 
+import warnings
 from pathlib import Path
 from types import ModuleType
+from packaging.version import Version
 import torch
 from huggingface_hub import snapshot_download
 from huggingface_hub.utils import disable_progress_bars
-from .utils import add_to_path, get_default_device  # noqa: F401 - for quick import later 'from vismatch import get_default_device'
+from .utils import add_to_path, get_default_device, route_linalg_inv_through_cpu  # noqa: F401 - for quick import later 'from vismatch import get_default_device'
 from .base_matcher import BaseMatcher  # noqa: F401 - for quick import later 'from vismatch import BaseMatcher'
 
 THIRD_PARTY_DIR = Path(__file__).parent.joinpath("third_party")  # exported for use by matcher modules
@@ -102,9 +104,8 @@ available_models = [
 
 
 def get_version(pkg: ModuleType) -> tuple[int, int, int]:
-    version_num = pkg.__version__.split("-")[0]
-    major, minor, patch = [int(num) for num in version_num.split(".")]
-    return major, minor, patch
+    v = Version(pkg.__version__)
+    return v.major, v.minor, v.micro
 
 
 def get_matcher(
@@ -122,8 +123,19 @@ def get_matcher(
             print(f"\n{'!' * 70}\n!!! HF repo 'vismatch/{name}' not found: {e}\n{'!' * 70}\n")
 
     device = str(device)  # In case device is passed as torch.device
+    _ = torch.device(device)  # Check that device is a valid device
     if device.startswith("cuda"):
         assert torch.cuda.is_available(), f"CUDA not available, cannot use device='{device}'"
+    if device.startswith("mps") and get_version(torch) < (2, 11, 0):
+        warnings.warn(
+            f"vismatch MPS support is validated on torch>=2.11 (yours: {torch.__version__}); several matchers "
+            "hit missing Metal ops (e.g. grid_sample bicubic/border) on older versions. "
+            "Upgrade torch, or use device='cpu' if a matcher fails."
+        )
+    if device.startswith("mps"):
+        # mps's torch.linalg.inv randomly returns NaN from a finite input (uninitialized-workspace
+        # bug), nan-poisoning RoMa/DKM's GP posterior; route it through cpu for every mps matcher
+        route_linalg_inv_through_cpu()
 
     if isinstance(matcher_name, list):
         from vismatch.base_matcher import EnsembleMatcher

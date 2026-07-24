@@ -6,12 +6,22 @@ import kornia
 
 from huggingface_hub import snapshot_download
 from vismatch import get_version, THIRD_PARTY_DIR, BaseMatcher
-from vismatch.utils import add_to_path, resize_to_divisible, disable_xformers
+from vismatch.utils import (
+    add_to_path,
+    resize_to_divisible,
+    disable_xformers,
+    force_float32,
+    patch_sample_keypoints_device,
+)
 
 add_to_path(THIRD_PARTY_DIR.joinpath("DeDoDe"))
 
 from DeDoDe import dedode_detector_L, dedode_descriptor_G
+from DeDoDe import utils as dedode_utils
+from DeDoDe.detectors import dedode_detector as dedode_detector_module
 from DeDoDe.matchers.dual_softmax_matcher import DualSoftMaxMatcher
+
+patch_sample_keypoints_device(dedode_utils, dedode_detector_module)
 
 
 class DedodeMatcher(BaseMatcher):
@@ -19,8 +29,6 @@ class DedodeMatcher(BaseMatcher):
 
     def __init__(self, device="cpu", max_num_keypoints=2048, dedode_thresh=0.05, detector_version=2, *args, **kwargs):
         super().__init__(device, **kwargs)
-
-        assert "cuda" in self.device, f"Device must be 'cuda' for {self.name}. Device='{self.device}' not supported"
 
         self.max_keypoints = max_num_keypoints
         self.threshold = dedode_thresh
@@ -36,6 +44,8 @@ class DedodeMatcher(BaseMatcher):
         self.detector = dedode_detector_L(weights=load_file(detector_path), device=device)
         self.descriptor = dedode_descriptor_G(weights=load_file(descriptor_path), device=device)
         self.matcher = DualSoftMaxMatcher()
+        if "cuda" not in self.device:
+            force_float32(self)  # half precision is not supported on CPU
 
     def preprocess(self, img):
         # ensure that the img has the proper w/h to be compatible with patch sizes
@@ -88,7 +98,7 @@ class DedodeMatcher(BaseMatcher):
         mkpts0 = self.rescale_coords(mkpts0, *img0_orig_shape, H0, W0)
         mkpts1 = self.rescale_coords(mkpts1, *img1_orig_shape, H1, W1)
 
-        return mkpts0, mkpts1, keypoints_0, keypoints_1, description_0.squeeze(0), description_1.squeeze(0)
+        return mkpts0, mkpts1, keypoints_0, keypoints_1, description_0.squeeze(0), description_1.squeeze(0), None
 
 
 class DedodeKorniaMatcher(BaseMatcher):
@@ -149,4 +159,4 @@ class DedodeKorniaMatcher(BaseMatcher):
             threshold=self.threshold,  # Increasing threshold -> fewer matches, fewer outliers
         )
 
-        return mkpts0, mkpts1, keypoints_0[0], keypoints_1[0], description_0[0], description_1[0]
+        return mkpts0, mkpts1, keypoints_0[0], keypoints_1[0], description_0[0], description_1[0], None

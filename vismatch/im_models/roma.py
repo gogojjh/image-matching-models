@@ -17,16 +17,17 @@ from skimage.util import img_as_ubyte
 
 
 class RomaMatcher(BaseMatcher):
-    dino_patch_size = 14
-    coarse_ratio = 560 / 864
-
     def __init__(self, device="cpu", max_num_keypoints=2048, *args, **kwargs):
         super().__init__(device, **kwargs)
-        self.roma_model = roma_outdoor(device=device)
+        # float16 amp is cuda-only: roma_outdoor already forces float32 on cpu, but on mps the
+        # fp16 default stays and the DINOv2 activations overflow to inf/nan (multinomial then
+        # fails on the nan certainty), so pin float32 on every non-cuda device
+        amp_dtype = torch.float16 if "cuda" in str(device) else torch.float32
+        self.roma_model = roma_outdoor(device=device, amp_dtype=amp_dtype)
         self.max_keypoints = max_num_keypoints
         self.normalize = tfm.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         self.roma_model.train(False)
-        if device == "cpu":
+        if "cuda" not in str(device):
             disable_xformers()
 
     def compute_padding(self, img0, img1):
@@ -64,13 +65,15 @@ class RomaMatcher(BaseMatcher):
         matches, certainty = self.roma_model.sample(warp, certainty, num=self.max_keypoints)
         mkpts0, mkpts1 = self.roma_model.to_pixel_coordinates(matches, h0, w0, h1, w1)
 
-        return mkpts0, mkpts1, None, None, None, None
+        return mkpts0, mkpts1, None, None, None, None, certainty
 
 
 class TinyRomaMatcher(BaseMatcher):
     def __init__(self, device="cpu", max_num_keypoints=2048, *args, **kwargs):
         super().__init__(device, **kwargs)
-        self.roma_model = tiny_roma_v1_outdoor(device=device)
+        # Load XFeat with trust_repo=True and pass it in, so the vendored builder skips its own trust prompt.
+        xfeat = torch.hub.load("verlab/accelerated_features", "XFeat", pretrained=True, top_k=4096, trust_repo=True)
+        self.roma_model = tiny_roma_v1_outdoor(device=device, xfeat=xfeat.net)
         self.max_keypoints = max_num_keypoints
         self.normalize = tfm.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         self.roma_model.train(False)
@@ -91,4 +94,4 @@ class TinyRomaMatcher(BaseMatcher):
         matches, certainty = self.roma_model.sample(warp, certainty, num=self.max_keypoints)
         mkpts0, mkpts1 = self.roma_model.to_pixel_coordinates(matches, h0, w0, h1, w1)
 
-        return mkpts0, mkpts1, None, None, None, None
+        return mkpts0, mkpts1, None, None, None, None, certainty

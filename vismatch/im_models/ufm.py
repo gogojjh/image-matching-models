@@ -13,10 +13,6 @@ from uniflowmatch.models.ufm import UniFlowMatchClassificationRefinement
 class UFMMatcher(BaseMatcher):
     def __init__(self, device="cpu", max_num_keypoints=1024, min_confidence=0.2, *args, **kwargs):
         super().__init__(device, **kwargs)
-        assert "cuda" in self.device or self.device == "cpu", (
-            f"Device must be 'cpu' or 'cuda' for {self.name}. Device='{self.device}' not supported"
-        )
-
         self.model = UniFlowMatchClassificationRefinement.from_pretrained("infinity1096/UFM-Refine")
         self.model = self.model.eval().to(self.device)
 
@@ -57,4 +53,4 @@ class UFMMatcher(BaseMatcher):
         mkpts0 = self.rescale_coords(mkpts0, *img0_orig_shape, H0, W0)
         mkpts1 = self.rescale_coords(mkpts1, *img1_orig_shape, H1, W1)
 
-        return mkpts0, mkpts1, None, None, None, None
+        return mkpts0, mkpts1, None, None, None, None, confidences

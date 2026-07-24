@@ -1,4 +1,5 @@
 from __future__ import annotations  # py38-compat
+import functools
 import importlib
 import logging
 from pathlib import Path
@@ -13,6 +14,61 @@ logger = logging.getLogger(__name__)
 logger.setLevel(31)  # Avoid printing useless low-level logs
 
 
+def set_device_globals(package: str, device: str | torch.device, amp_dtype: torch.dtype | None = None) -> None:
+    """Rebind the `device` (and optionally `amp_dtype`) globals in every loaded module of *package*.
+
+    Repos like LoMa and RoMaV2 resolve them once at import time (cuda whenever a GPU is visible)
+    and each submodule keeps its own binding, so overwriting the source module alone has no effect.
+    """
+    device = torch.device(device)
+    for name, module in list(sys.modules.items()):
+        if name == package or name.startswith(package + "."):
+            if isinstance(getattr(module, "device", None), torch.device):
+                module.device = device
+            if amp_dtype is not None and isinstance(getattr(module, "amp_dtype", None), torch.dtype):
+                module.amp_dtype = amp_dtype
+
+
+def patch_sample_keypoints_device(*modules) -> None:
+    """Wrap DeDoDe-style `sample_keypoints` so its tensors follow the scoremap's device.
+
+    DeDoDe-family repos evaluate `device=get_best_device()` in its signature at import time,
+    hardcoding cuda whenever a GPU is visible, and their detectors call it without a device.
+    """
+    for module in modules:
+        func = module.sample_keypoints
+        if getattr(func, "_device_follows_input", False):
+            continue
+
+        @functools.wraps(func)
+        def wrapper(scoremap, *args, _func=func, **kwargs):
+            kwargs.setdefault("device", scoremap.device)
+            return _func(scoremap, *args, **kwargs)
+
+        wrapper._device_follows_input = True
+        module.sample_keypoints = wrapper
+
+
+def prime_cublas_before_tensorflow() -> None:
+    """Force torch to initialize its batched cuBLAS handle before TensorFlow loads CUDA.
+
+    In a process importing both torch and TensorFlow, if TensorFlow initializes CUDA first, every
+    later *batched* ``torch.linalg`` op fails with CUBLAS_STATUS_INTERNAL_ERROR (e.g. matchanything-roma's
+    gp posterior). Running the batched path once here claims the handle first; a plain matmul or handle
+    creation is not enough. Call before ``import tensorflow``; no-op without CUDA.
+    """
+    if torch.cuda.is_available():
+        torch.linalg.inv(torch.eye(2, device="cuda").repeat(2, 1, 1))
+
+
+def hide_gpu_from_tensorflow(tensorflow) -> None:
+    """Stop TensorFlow from claiming GPU memory: vismatch runs its TF models (omniglue, zippypoint) on CPU.
+
+    Call right after ``import tensorflow``.
+    """
+    tensorflow.config.set_visible_devices([], "GPU")
+
+
 def disable_xformers():
     """Disable xformers in all loaded modules, so that models fall back to standard PyTorch attention.
 
@@ -22,6 +78,35 @@ def disable_xformers():
     for module in sys.modules.values():
         if hasattr(module, "XFORMERS_AVAILABLE"):
             module.XFORMERS_AVAILABLE = False
+
+
+def route_linalg_inv_through_cpu() -> None:
+    """Route ``torch.linalg.inv`` through cpu: on mps the kernel intermittently returns NaN from a
+    finite input (an uninitialized-workspace bug), nan-poisoning RoMa/DKM's GP posterior so its
+    sampling fails at random. Idempotent; cpu/cuda inputs pass straight through."""
+    inv = torch.linalg.inv
+    if getattr(inv, "_mps_safe", False):
+        return
+
+    def mps_safe_inv(A, *a, **k):
+        return inv(A.cpu(), *a, **k).to(A.device) if A.device.type == "mps" else inv(A, *a, **k)
+
+    mps_safe_inv._mps_safe = True
+    torch.linalg.inv = mps_safe_inv
+
+
+def force_float32(module: torch.nn.Module):
+    """Fully convert a model to float32 (e.g. for CPU), including submodules hidden in plain lists
+    and amp_dtype attributes, which module.float() does not reach."""
+    module.float()
+    for mod in module.modules():
+        if hasattr(mod, "amp_dtype"):
+            mod.amp_dtype = torch.float32
+        for attribute in vars(mod).values():
+            if isinstance(attribute, list):
+                for item in attribute:
+                    if isinstance(item, torch.nn.Module):
+                        item.float()
 
 
 def get_image_pairs_paths(inputs: list[Path] | Path) -> list[tuple[Path, Path]]:
@@ -116,6 +201,8 @@ def to_tensor(x: np.ndarray | torch.Tensor, device: str = None) -> torch.Tensor:
         x = torch.from_numpy(x)
 
     if device is not None:
+        if "mps" in str(device) and x.dtype == torch.float64:
+            x = x.float()  # MPS does not support float64
         return x.to(device)
     else:
         return x
@@ -231,50 +318,23 @@ def load_module(module_name: str, module_path: Path | str) -> None:
     spec.loader.exec_module(module)
 
 
-_THIRD_PARTY_DIR = str(Path(__file__).resolve().parent / "third_party") + "/"
-
-
-def add_to_path(path: str | Path, **_kwargs) -> None:
+def add_to_path(path: str | Path) -> None:
     """Add *path* to the front of ``sys.path``, allowing imports from it.
 
-    Always inserts at position 0 so the most recently added directory wins.
-    Auto-detects every package and module in *path* and, if any of them are
-    already cached in ``sys.modules`` from a different vismatch third-party
-    directory, flushes the stale entries so the next import resolves correctly.
-    User code, stdlib, and pip packages are never touched.
+    When a matcher's ImportSandbox is active (the normal case) the dir is registered with it and
+    kept on ``sys.path`` only while that wrapper's code runs; see vismatch/import_sandbox.py.
     """
+    from vismatch.import_sandbox import ImportSandbox
+
     path = str(Path(path).resolve())
+    sandbox = ImportSandbox.active()
+    if sandbox is not None:
+        sandbox.add_path(path)
+        return
+
     if path in sys.path:
         sys.path.remove(path)
     sys.path.insert(0, path)
-
-    # Auto-detect and flush stale modules from other third-party repos.
-    base = Path(path).resolve()
-    if not base.is_dir():
-        return
-    prefix = str(base) + "/"
-    for child in base.iterdir():
-        # Only consider regular Python packages (dir + __init__.py) and .py modules.
-        if child.is_dir() and child.joinpath("__init__.py").is_file():
-            name = child.name
-        elif child.is_file() and child.suffix == ".py" and child.name != "__init__.py":
-            name = child.stem
-        else:
-            continue
-        mod = sys.modules.get(name)
-        if mod is None:
-            continue
-        origin = getattr(mod, "__file__", None)
-        if not origin:
-            continue  # built-in — leave it alone
-        resolved = str(Path(origin).resolve())
-        if resolved.startswith(prefix):
-            continue  # already loaded from this directory
-        if not resolved.startswith(_THIRD_PARTY_DIR):
-            continue  # loaded from user code / pip / stdlib — never touch it
-        # Stale module from a different vismatch/third-party repo — flush it
-        for k in [k for k in sys.modules if k == name or k.startswith(name + ".")]:
-            del sys.modules[k]
 
 
 def get_default_device() -> str:
