@@ -31,6 +31,12 @@ Vis(ion)Match(ers) is a unified API for quickly and easily trying 50+ (and growi
 
 Jump to: [Install](#install) | [Use](#use) | [Models](#available-models) | [Add a Model / Contributing](#adding-a-new-method) | [Acknowledgements](#acknowledgements) | [Cite](#cite) | [Download Stats](#download-stats) | [Documentation](#documentation)
 
+## Differences from upstream ([gmberton/vismatch](https://github.com/gmberton/vismatch))
+
+This fork (`gogojjh/vismatch`) tracks upstream `main` and adds:
+- **Python 3.8 compatibility**: `from __future__ import annotations` is applied across the package (and `pyproject.toml`'s `requires-python` lowered to `>= 3.8`), so the modern-style type hints used throughout also work on Python 3.8.
+- **MASt3R confidence-filter port**: `vismatch/im_models/master.py` ports the OpenNavMap MASt3R confidence filter (`min_conf_thr` / `_filter_by_conf`) to this py3.8-compatible code path.
+
 ### Matching Examples
 Compare matching models across various scenes. For example, we show `SIFT-LightGlue` and `LoFTR` matches on pairs: 
 <p>(1) outdoor, (2) indoor, (3) satellite remote sensing, (4) paintings, (5) a false positive, and (6) spherical. </p>
